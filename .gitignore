@@ -1,0 +1,8 @@
+.env
+*.png
+*.tif
+*.tiff
+__pycache__/
+*.pyc
+.DS_Store
+outputs/
