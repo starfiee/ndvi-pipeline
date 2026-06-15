@@ -1,7 +1,7 @@
-earthengine-api==1.7.26
+earthengine-api
 geopandas
 shapely
-matplotlib==3.10.8
+rasterio
 numpy
-rasterio==1.4.3
-python-dotenv
+matplotlib
+mysql-connector-python

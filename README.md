@@ -1,90 +1,79 @@
 # NDVI Field Analysis Pipeline
 
-Automated satellite imagery pipeline that accepts field polygon coordinates,
-finds the most recent cloud-free Sentinel-2 image using field-level cloud
-scoring, and computes NDVI statistics with vegetation classification maps.
+Automated satellite imagery pipeline that accepts field polygon 
+coordinates, retrieves clean Sentinel-2 imagery using field-level 
+cloud scoring, computes NDVI statistics, stores per-pixel data to 
+a database, and generates vegetation maps on demand.
 
-Built for production use at a precision agriculture startup.
+Built for production use at a precision agriculture startup in Pakistan.
 
 ---
 
-## What it does
+## Pipeline Phases
 
-- Accepts any number of polygon coordinates as input (unlimited points)
-- Searches Sentinel-2 archive and scores cloud cover at **field level**
-  using Google Cloud Score Plus — more accurate than tile-level percentage
+### Phase 2 — Field NDVI with Cloud Filtering
+`src/phase2/ndvi_pipeline.py`
+
+- Accepts any number of polygon coordinates as input
+- Searches Sentinel-2 archive oldest to newest from a given start date
+- Scores cloud cover at field level using Google Cloud Score Plus
+- Returns first clean image where field cloud probability is below 25%
 - Computes NDVI min / max / mean across the field
-- Classifies pixels into 10 vegetation categories
-- Outputs 3 georeferenced PNG maps: raw NDVI, vegetation class, crop cover
-- Handles backward-compatible argument formats (old 82-arg and new variable format)
+- Classifies pixels into 10 vegetation categories with real hectare areas
+- Outputs crop cover percentage
+- Prints result to stdout for PHP integration
+- Saves 3 georeferenced PNG maps automatically
+
+### Phase 3 — Pixel Storage and On-Demand PNG Generation
+`src/phase3/data_collector.py`
+`src/phase3/png_generator.py`
+
+Major architectural upgrade over Phase 2:
+
+- Every pixel saved to database with its real-world latitude and longitude
+- NDVI class assigned per pixel at storage time
+- Summary statistics stored in separate results table
+- PNG generation removed from automatic pipeline
+- New on-demand PNG generator reads directly from pixel database
+- No satellite call needed for PNG generation
+- Duplicate prevention via UNIQUE KEY constraints
+
+Why pixel-level storage matters:
+
+1. Tree pixel identification — pixels that stay consistently above 
+   0.6 NDVI across seasons can be flagged as permanent vegetation 
+   and excluded from crop calculations improving accuracy
+
+2. Time series per pixel — each pixel builds its own NDVI history 
+   over time enabling crop growth stage detection and yield prediction
+
+3. ML and deep learning ready — pixel data with lat/lng coordinates 
+   and class labels is the exact format needed for training crop 
+   classification and disease detection models
 
 ---
 
-## Example output
-
-| NDVI Map | Vegetation Classes | Crop Cover |
-|---|---|---|
-| ![ndvi](demo/sample_output/ndvi_example.png) | ![class](demo/sample_output/ndviclass_example.png) | ![crop](demo/sample_output/cropcover_example.png) |
-
----
-
-## Tech stack
-
-`Python` `Google Earth Engine` `Sentinel-2` `GeoPandas` `Rasterio` `NumPy` `Matplotlib`
-
----
-
-## Setup
-
-**1. Clone the repo**
-```bash
-git clone https://github.com/[your-username]/ndvi-pipeline.git
-cd ndvi-pipeline
-```
-
-**2. Install dependencies**
-```bash
-pip install -r requirements.txt
-```
-
-**3. Authenticate Google Earth Engine**
-```bash
-earthengine authenticate
-```
-
-**4. Set your environment variable**
-```bash
-cp .env.example .env
-# Edit .env and add your GEE project ID
-```
-
-**5. Run the test harness**
-```bash
-python ndvi_pipeline.py
-```
-
----
-
-## How cloud filtering works
+## How Cloud Filtering Works
 
 Each candidate image is scored at two levels:
-1. **Tile level** — `CLOUDY_PIXEL_PERCENTAGE` from Sentinel-2 metadata
-2. **Field level** — Google Cloud Score Plus (`cs_cdf` band), averaged over
-   the exact polygon area
+
+- Tile level — CLOUDY_PIXEL_PERCENTAGE from Sentinel-2 metadata 
+  covers the entire 100km x 100km satellite tile
+- Field level — Google Cloud Score Plus cs_cdf band averaged over 
+  the exact polygon area only
 
 Only images with field-level cloud probability below 25% are accepted.
-This prevents cases where a tile is mostly clear but the specific field is cloudy.
+
+This prevents cases where a tile appears mostly clear but the specific 
+field polygon is under cloud cover — a critical distinction for small 
+agricultural fields in Pakistan.
 
 ---
 
-## Output format
+## Database Schema
 
-```
-Sawie-ndvi-parameters
-{min} {max} {mean}
-[{"class":"Water","area_ha":0}, ...]
-image_date:2026-05-12
-cloud_prob:0.0812
-status:clean
-created_at:2026-05-12 14:33:01
-```
+See `database/schema.sql` for complete table definitions.
+
+Two tables:
+
+**ndvi_pixels** — one row per pixel per field per date
