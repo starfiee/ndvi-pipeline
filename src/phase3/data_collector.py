@@ -10,6 +10,9 @@ Print stdout output for PHP same format as Phase 2
 
 import sys
 import json
+import os
+from dotenv import load_dotenv
+load_dotenv()
 import mysql.connector
 from shapely.geometry import Polygon
 import geopandas as gpd
@@ -24,14 +27,14 @@ import numpy as np
 from rasterio.transform import from_bounds
 
 # Initialize GEE
-ee.Initialize(project='mineral-oxide-477807-b2')
+ee.Initialize(project=os.getenv('GEE_PROJECT_ID'))
 
 # ── DB CONFIG ──────────────────────────────────────────────
 DB_CONFIG = {
-    'host'    : 'localhost',
-    'user'    : 'root',
-    'password': '',
-    'database': 'sawie_ndvi'
+    'host'    : os.getenv('DB_HOST', 'localhost'),
+    'user'    : os.getenv('DB_USER', 'root'),
+    'password': os.getenv('DB_PASSWORD', ''),
+    'database': os.getenv('DB_NAME', 'ndvi')
 }
 
 # ── FUNCTION 1 — Parse Arguments ──────────────────────────

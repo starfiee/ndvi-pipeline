@@ -89,6 +89,20 @@ cloud_prob, total_pixels, valid_pixels, crop_cover_pct, status
 ---
 
 ## Setup
+### How to get your GEE Project ID
+
+1. Go to https://console.cloud.google.com
+2. Create a new project or use existing one
+3. Go to https://earthengine.google.com
+4. Click Sign Up and register your project
+5. Copy your project ID and paste in .env file
+
+### How to set up your database
+
+1. Install MySQL or use XAMPP
+2. Create a new database
+3. Import database/schema.sql
+4. Add your database credentials to .env file
 
 ### 1. Clone the repo
 git clone https://github.com/starfiee/ndvi-pipeline.git

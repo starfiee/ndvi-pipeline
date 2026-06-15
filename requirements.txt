@@ -5,3 +5,4 @@ rasterio
 numpy
 matplotlib
 mysql-connector-python
+python-dotenv
