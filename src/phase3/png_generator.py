@@ -25,14 +25,18 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.patches import Patch
+import os
+from dotenv import load_dotenv
 import numpy as np
-
+load_dotenv()
 # ── DB CONFIG ──────────────────────────────────────────────
+
+
 DB_CONFIG = {
-    'host'    : 'localhost',
-    'user'    : 'root',
-    'password': '',
-    'database': 'sawie_ndvi'
+    'host'    : os.getenv('DB_HOST', 'localhost'),
+    'user'    : os.getenv('DB_USER', 'root'),
+    'password': os.getenv('DB_PASSWORD', ''),
+    'database': os.getenv('DB_NAME', 'ndvi')
 }
 
 # ── FUNCTION 1 — Parse Arguments ──────────────────────────

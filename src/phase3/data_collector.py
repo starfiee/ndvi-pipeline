@@ -10,31 +10,23 @@ Print stdout output for PHP same format as Phase 2
 
 import sys
 import json
-import os
-from dotenv import load_dotenv
-load_dotenv()
 import mysql.connector
 from shapely.geometry import Polygon
 import geopandas as gpd
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-from matplotlib.patches import Patch
 from datetime import datetime, timedelta
 import ee
 import numpy as np
 from rasterio.transform import from_bounds
 
 # Initialize GEE
-ee.Initialize(project=os.getenv('GEE_PROJECT_ID'))
+ee.Initialize(project='mineral-oxide-477807-b2')
 
 # ── DB CONFIG ──────────────────────────────────────────────
 DB_CONFIG = {
-    'host'    : os.getenv('DB_HOST', 'localhost'),
-    'user'    : os.getenv('DB_USER', 'root'),
-    'password': os.getenv('DB_PASSWORD', ''),
-    'database': os.getenv('DB_NAME', 'ndvi')
+    'host'    : 'localhost',
+    'user'    : 'root',
+    'password': '',
+    'database': 'sawie_ndvi'
 }
 
 # ── FUNCTION 1 — Parse Arguments ──────────────────────────
@@ -260,8 +252,11 @@ def fetch_from_gee(polygon, start_date=None):
         raise Exception(f"No clean image found after {search_from}")
 
     # Calculate NDVI
-    ndvi   = image.normalizedDifference(['B8', 'B4'])
-    result = ndvi.sampleRectangle(region=gee_polygon)
+# Replace NDVI section in fetch_from_gee()
+    ndvi      = image.normalizedDifference(['B8', 'B4'])
+    ndvi_masked = ndvi.updateMask(ee.Image.constant(1).clip(gee_polygon)) \
+                  .unmask(-2)
+    result    = ndvi_masked.sampleRectangle(region=gee_polygon)
     nd_values = result.getInfo()['properties']['nd']
 
     # Build transform
@@ -331,6 +326,7 @@ def calculate_stats(nd_values, transform):
     """
     arr   = np.array(nd_values, dtype=float)
     flat  = arr.flatten()
+    flat[flat <= -2] = np.nan
     valid = flat[~np.isnan(flat)]
 
     ndvi_min  = float(np.min(valid))
@@ -424,7 +420,7 @@ def save_to_database(field_id, image_date, nd_values,
     for r in range(rows):
         for c in range(cols):
             ndvi_val = nd_values[r][c]
-            if ndvi_val is None or np.isnan(float(ndvi_val)):
+            if ndvi_val is None or float(ndvi_val) <= -2:
                 continue
 
             ndvi_val   = float(ndvi_val)
@@ -477,91 +473,6 @@ def print_outputs(stats, image_date, field_cloud_prob):
     print(f"status:clean")
     print(f"created_at:{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-# ── FUNCTION 10 — Save PNGs ────────────────────────────────
-def save_pngs(nd_values, polygon, transform, fid):
-    """
-    Saves 3 PNG files matching R output.
-    Called only when explicitly needed.
-    In Phase 3 PNGs are generated on demand
-    from database pixels via png_generator.py
-    """
-    fid_int = int(fid)
-    arr     = np.array(nd_values, dtype=float)
-    band    = arr
-
-    pixel_width  = abs(transform[0])
-    pixel_height = abs(transform[4])
-    west         = transform[2]
-    north        = transform[5]
-    height, width = band.shape
-    lng_min = west
-    lat_max = north
-    lng_max = lng_min + width  * pixel_width
-    lat_min = lat_max - height * pixel_height
-
-    poly_x = list(polygon.exterior.coords.xy[0])
-    poly_y = list(polygon.exterior.coords.xy[1])
-
-    # PNG 1 — NDVI map
-    fig, ax     = plt.subplots(figsize=(7, 7))
-    band_masked = np.ma.masked_invalid(band)
-    cmap_ndvi   = plt.cm.RdYlGn.copy()
-    cmap_ndvi.set_bad(color='white')
-    im = ax.imshow(band_masked, cmap=cmap_ndvi,
-                   extent=[lng_min, lng_max, lat_min, lat_max], origin='upper')
-    ax.plot(poly_x, poly_y, color='black', linewidth=2)
-    plt.colorbar(im, ax=ax)
-    fname = f"ndvi-{fid_int}.png"
-    plt.savefig(fname, dpi=100, bbox_inches='tight')
-    plt.close()
-    print(f"Saved: {fname}")
-
-    # PNG 2 — NDVI classification
-    vegc = np.full(band.shape, np.nan, dtype=float)
-    vegc[~np.isnan(band) & (band <= 0.25)]                  = 1
-    vegc[~np.isnan(band) & (band > 0.25) & (band <= 0.30)] = 2
-    vegc[~np.isnan(band) & (band > 0.30) & (band <= 0.40)] = 3
-    vegc[~np.isnan(band) & (band > 0.40) & (band <= 0.50)] = 4
-    vegc[~np.isnan(band) & (band > 0.50) & (band <= 0.60)] = 5
-    vegc[~np.isnan(band) & (band > 0.60) & (band <= 0.80)] = 6
-    vegc[~np.isnan(band) & (band > 0.80)]                  = 7
-    vegc_masked    = np.ma.masked_invalid(vegc)
-    terrain_colors = ['#F2F2A0','#D4C878','#A8C878',
-                      '#78C878','#50A050','#287828','#005000']
-    cmap_vegc = mcolors.ListedColormap(terrain_colors)
-    cmap_vegc.set_bad(color='white')
-    fig, ax = plt.subplots(figsize=(7, 7))
-    ax.imshow(vegc_masked, cmap=cmap_vegc, vmin=1, vmax=7,
-              extent=[lng_min, lng_max, lat_min, lat_max], origin='upper')
-    ax.set_title('NDVI based thresholding')
-    fname = f"ndviclass-{fid_int}.png"
-    plt.savefig(fname, dpi=100, bbox_inches='tight')
-    plt.close()
-    print(f"Saved: {fname}")
-
-    # PNG 3 — Crop cover
-    crop_cover             = np.full(band.shape, np.nan, dtype=float)
-    valid_mask             = ~np.isnan(band)
-    crop_cover[valid_mask & (band <= 0.2)] = 0
-    crop_cover[valid_mask & (band > 0.2)]  = 1
-    crop_masked = np.ma.masked_invalid(crop_cover)
-    cmap_crop   = mcolors.ListedColormap(['#A0522D', '#00BB00'])
-    cmap_crop.set_bad(color='white')
-    fig, ax = plt.subplots(figsize=(7, 7))
-    ax.imshow(crop_masked, cmap=cmap_crop, vmin=0, vmax=1,
-              extent=[lng_min, lng_max, lat_min, lat_max], origin='upper')
-    ax.plot(poly_x, poly_y, color='black', linewidth=2)
-    from matplotlib.patches import Patch
-    legend_elements = [
-        Patch(facecolor='brown', label='No Crop'),
-        Patch(facecolor='green', label='Crop Cover')
-    ]
-    ax.legend(handles=legend_elements, loc='upper right')
-    ax.set_title('Crop Cover Classification')
-    fname = f"cropcover-{fid_int}.png"
-    plt.savefig(fname, dpi=100, bbox_inches='tight')
-    plt.close()
-    print(f"Saved: {fname}")
 
 # ── MAIN ───────────────────────────────────────────────────
 if __name__ == "__main__":
